@@ -1,4 +1,3 @@
-# scrap_table.py
 import os
 import json
 import uuid
@@ -8,21 +7,23 @@ from playwright.async_api import async_playwright
 
 async def _fetch_table():
     url = "https://sgonorte.bomberosperu.gob.pe/24horas/?criterio=/"
-    selector = "table" 
+    selector = "table"  # la única tabla de interés
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
         page = await browser.new_page()
         await page.goto(url, wait_until="networkidle")
         await page.wait_for_selector(selector, timeout=10_000)
 
-        # 1) Extraer encabezados
+        # Encabezados
         headers = await page.eval_on_selector_all(
             f"{selector} thead th",
             "ths => ths.map(th => th.innerText.trim())"
         )
-
-        # 2) Extraer filas
+        # Filas
         data = []
         rows = await page.query_selector_all(f"{selector} tbody tr")
         for idx, tr in enumerate(rows, start=1):
@@ -47,19 +48,19 @@ def lambda_handler(event, context):
     dynamodb = boto3.resource("dynamodb")
     table = dynamodb.Table(table_name)
 
-    # Vaciar tabla
+    # vaciar tabla
     scan = table.scan(ProjectionExpression="id")
     with table.batch_writer() as batch:
         for item in scan.get("Items", []):
             batch.delete_item(Key={"id": item["id"]})
 
-    # Insertar nuevos registros
+    # insertar nuevos
     for item in data:
         table.put_item(Item=item)
 
     # 3) Devolver JSON
     return {
         "statusCode": 200,
-        "headers": { "Content-Type": "application/json" },
+        "headers": {"Content-Type": "application/json"},
         "body": json.dumps(data, ensure_ascii=False)
     }
