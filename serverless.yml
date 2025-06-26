@@ -6,9 +6,8 @@ plugins:
 
 custom:
   pythonRequirements:
-    dockerizePip: true       # compila C-extensions en contenedor Amazon Linux
-    slim: true               # elimina archivos fuente innecesarios
-    layer: false             # incluimos deps junto al código
+    dockerizePip: true    # empaqueta en un contenedor Amazon Linux
+    slim: false            # NO elimines archivos C compilados
     zip: true
 
 provider:
