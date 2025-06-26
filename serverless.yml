@@ -1,6 +1,16 @@
 org: polomaru
 service: api-web-scraping
 
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: true       # compila C-extensions en contenedor Amazon Linux
+    slim: true               # elimina archivos fuente innecesarios
+    layer: false             # incluimos deps junto al código
+    zip: true
+
 provider:
   name: aws
   runtime: python3.12
@@ -9,7 +19,7 @@ provider:
   environment:
     TABLE_NAME: TablaWebScrapping
   iam:
-    role: arn:aws:iam::157403467473:role/LabRole	
+    role: arn:aws:iam::157403467473:role/LabRole
 
 functions:
   scrape_table:
@@ -23,7 +33,6 @@ functions:
           path: scrape/table
           method: get
           cors: true
-          integration: lambda
 
 resources:
   Resources:
