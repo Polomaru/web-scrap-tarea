@@ -1,53 +1,65 @@
+# scrap_table.py
+import os
 import json
 import uuid
-import os
-from playwright.sync_api import sync_playwright
+import asyncio
 import boto3
+from playwright.async_api import async_playwright
+
+async def _fetch_table():
+    url = "https://sgonorte.bomberosperu.gob.pe/24horas/?criterio=/"
+    selector = "table" 
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
+        page = await browser.new_page()
+        await page.goto(url, wait_until="networkidle")
+        await page.wait_for_selector(selector, timeout=10_000)
+
+        # 1) Extraer encabezados
+        headers = await page.eval_on_selector_all(
+            f"{selector} thead th",
+            "ths => ths.map(th => th.innerText.trim())"
+        )
+
+        # 2) Extraer filas
+        data = []
+        rows = await page.query_selector_all(f"{selector} tbody tr")
+        for idx, tr in enumerate(rows, start=1):
+            cells = await tr.query_selector_all("td")
+            row = {}
+            for i, h in enumerate(headers):
+                text = await cells[i].inner_text() if i < len(cells) else ""
+                row[h] = text.strip()
+            row["#"] = idx
+            row["id"] = str(uuid.uuid4())
+            data.append(row)
+
+        await browser.close()
+    return data
 
 def lambda_handler(event, context):
-    url = "https://ultimosismo.igp.gob.pe/ultimo-sismo/sismos-reportados"
-    selector = "table.table.table-hover.table-bordered.table-light.border-white.w-100"
+    # 1) Scrape dinámico
+    data = asyncio.get_event_loop().run_until_complete(_fetch_table())
 
-    # ——— Scraping con Playwright ———
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(url, wait_until="networkidle")
-        page.wait_for_selector(selector, timeout=10_000)
-
-        # extraer encabezados
-        headers = [h.inner_text().strip() for h in page.query_selector_all(f"{selector} thead th")]
-
-        # extraer filas
-        rows = []
-        for idx, tr in enumerate(page.query_selector_all(f"{selector} tbody tr"), start=1):
-            cells = tr.query_selector_all("td")
-            obj = { headers[i]: cells[i].inner_text().strip() if i < len(cells) else ""
-                    for i in range(len(headers)) }
-            obj["#"] = idx
-            obj["id"] = str(uuid.uuid4())
-            rows.append(obj)
-
-        browser.close()
-
-    # ——— Guardar en DynamoDB ———
+    # 2) Guardar en DynamoDB
+    table_name = os.environ["TABLE_NAME"]
     dynamodb = boto3.resource("dynamodb")
-    table_name = os.getenv("TABLE_NAME", "TablaWebScrapping")
     table = dynamodb.Table(table_name)
 
-    # Vaciamos la tabla antes de meter datos nuevos
+    # Vaciar tabla
     scan = table.scan(ProjectionExpression="id")
     with table.batch_writer() as batch:
         for item in scan.get("Items", []):
             batch.delete_item(Key={"id": item["id"]})
 
-    # Insertar filas frescas
-    for item in rows:
+    # Insertar nuevos registros
+    for item in data:
         table.put_item(Item=item)
 
-    # ——— Respuesta HTTP ———
+    # 3) Devolver JSON
     return {
         "statusCode": 200,
         "headers": { "Content-Type": "application/json" },
-        "body": json.dumps(rows, ensure_ascii=False)
+        "body": json.dumps(data, ensure_ascii=False)
     }
